@@ -1,0 +1,153 @@
+---
+- name: Prerequisite Tasks
+  hosts: keycloak
+  become: true
+  tasks:
+    - name: Create Podman User
+      ansible.builtin.user:
+        name: "{{ podman_run_as_user }}"
+        create_home: true # Hosts mount points for container
+        password: "!" # Disabled
+        system: false # Needs subuid and subgid
+    - name: Certificate tasks block
+      block:
+        - name: Install certificate prerequisite packages
+          ansible.builtin.package:
+            name: "{{ item }}"
+            state: "present"
+          loop: ["python3-cryptography"]
+        - name: Create certificate directory
+          ansible.builtin.file:
+            path: "/home/{{ podman_run_as_user }}/certs"
+            state: "directory"
+            owner: "{{ podman_run_as_user }}"
+            group: "{{ podman_run_as_user }}"
+            mode: "0755"
+        - name: Create private key for certificate
+          community.crypto.openssl_privatekey:
+            path: "/home/{{ podman_run_as_user }}/certs/selfsigned.key"
+            owner: "{{ podman_run_as_user }}"
+            mode: "0644"
+        - name: Generate CSR for self-signed certificate
+          community.crypto.openssl_csr_pipe:
+            privatekey_path: "/home/{{ podman_run_as_user }}/certs/selfsigned.key"
+            common_name: "{{ ansible_hostname }}.{{ ansible_dns.search[0] }}"
+            authority_cert_issuer: "DNS:localhost" # Keycloak fails if issuer DN is empty
+            authority_cert_serial_number: "1"
+          register: selfsigned_csr
+          changed_when: false
+          ignore_errors: "{{ ansible_check_mode }}" # privatekey_path may not exist
+        - name: Self-sign certificate from CSR
+          community.crypto.x509_certificate:
+            path: "/home/{{ podman_run_as_user }}/certs/selfsigned.pem"
+            csr_content: "{{ selfsigned_csr.csr }}"
+            privatekey_path: "/home/{{ podman_run_as_user }}/certs/selfsigned.key"
+            provider: "selfsigned"
+            owner: "{{ podman_run_as_user }}"
+            mode: "0644"
+          ignore_errors: "{{ ansible_check_mode }}" # csr_content is not be created by openssl_csr_pipe in check mode
+    - name: OpenLDAP tasks block
+      block:
+        - name: Create ldif volume directory
+          ansible.builtin.file:
+            path: "/home/{{ podman_run_as_user }}/openldap_podman/volumes/openldap"
+            state: "directory"
+            owner: 100910 # openldap runs as uid 910
+            group: 100910 # openldap runs as gid 910
+            mode: "0755"
+        - name: Generate ldif configuration file
+          ansible.builtin.copy:
+            content: "{{ openldap_ldif_content }}"
+            dest: "/home/{{ podman_run_as_user }}/openldap_podman/volumes/openldap/lab.ldif"
+            owner: "{{ podman_run_as_user }}"
+            group: "{{ podman_run_as_user }}"
+            mode: "0755"
+
+- name: Podman Roles
+  hosts: keycloak
+  become: true
+  roles:
+    - fedora.linux_system_roles.podman
+  post_tasks:
+    - name: Generate Podman completion scripts
+      ansible.builtin.command:
+        cmd: "podman completion -f /etc/bash_completion.d/podman bash"
+        creates: "/etc/bash_completion.d/podman"
+
+- name: Keycloak API Tasks
+  hosts: keycloak
+  become: true
+  tasks:
+    - name: Keycloak API tasks block
+      block:
+        - name: Create Keycloak realms
+          community.general.keycloak_realm:
+            auth_client_id: "{{ keycloak_common.client_id | default('admin-cli') }}"
+            auth_keycloak_url: "{{ keycloak_common.keycloak_url }}"
+            auth_realm: "{{ keycloak_common.realm }}"
+            auth_username: "{{ keycloak_common.username }}"
+            auth_password: "{{ keycloak_common.password }}"
+            validate_certs: "{{ keycloak_common.validate_certs | default(true) }}"
+            realm: "{{ item.realm }}"
+            id: "{{ item.id | default(item.realm) }}"
+            enabled: "{{ item.enabled | default(true) }}"
+          loop: "{{ keycloak_realms }}"
+        - name: Create Keycloak User Federations
+          community.general.keycloak_user_federation:
+            auth_client_id: "{{ keycloak_common.client_id | default('admin-cli') }}"
+            auth_keycloak_url: "{{ keycloak_common.keycloak_url }}"
+            auth_realm: "{{ keycloak_common.realm }}"
+            auth_username: "{{ keycloak_common.username }}"
+            auth_password: "{{ keycloak_common.password }}"
+            validate_certs: "{{ keycloak_common.validate_certs | default(true) }}"
+            realm: "{{ item.realm }}"
+            name: "{{ item.name }}"
+            id: "{{ item.id | default(item.name) }}"
+            provider_id: "{{ item.provider_id }}"
+            provider_type: "{{ item.provider_type | default('org.keycloak.storage.UserStorageProvider') }}"
+            config:
+              authType: "{{ item.authType }}"
+              bindCredential: "{{ item.bindCredential }}"
+              bindDn: "{{ item.bindDn }}"
+              connectionUrl: "{{ item.connectionUrl }}"
+              editMode: "{{ item.editMode | default('READ_ONLY') }}"
+              enabled: "{{ item.enabled | default(true) }}"
+              importEnabled: "{{ item.importEnabled | default(true) }}"
+              pagination: "{{ item.pagination | default(true) }}"
+              priority: "{{ item.pagination | default(0) }}"
+              rdnLDAPAttribute: "{{ item.rdnLDAPAttribute | default('uid') }}"
+              searchScope: "{{ item.searchScope | default(1) }}"
+              syncRegistrations: "{{ item.syncRegistrations | default(false) }}"
+              trustEmail: "{{ item.trustEmail | default(false) }}"
+              userObjectClasses: "{{ item.userObjectClasses | default('inetOrgPerson, organizationalPerson') }}"
+              usernameLDAPAttribute: "{{ item.usernameLDAPAttribute | default('uid') }}"
+              usersDn: "{{ item.usersDn }}"
+              uuidLDAPAttribute: "{{ item.uuidLDAPAttribute | default('objectUUID') }}"
+              vendor: "{{ item.vendor | default('other') }}"
+            # mappers:
+            #   - name: "full name"
+            #     providerId: "full-name-ldap-mapper"
+            #     providerType: "org.keycloak.storage.ldap.mappers.LDAPStorageMapper"
+            #     config:
+            #       ldap.full.name.attribute: cn
+            #       read.only: true
+            #       write.only: false
+          loop: "{{ keycloak_user_federations }}"
+        - name: Create Keycloak Clients
+          community.general.keycloak_client:
+            auth_client_id: "{{ keycloak_common.client_id | default('admin-cli') }}"
+            auth_keycloak_url: "{{ keycloak_common.keycloak_url }}"
+            auth_realm: "{{ keycloak_common.realm }}"
+            auth_username: "{{ keycloak_common.username }}"
+            auth_password: "{{ keycloak_common.password }}"
+            validate_certs: "{{ keycloak_common.validate_certs | default(true) }}"
+            realm: "{{ item.realm }}"
+            id: "{{ item.id }}"
+            client_id: "{{ item.client_id | default(item.id) }}"
+            enabled: "{{ item.enabled | default(true) }}"
+            client_authenticator_type: "{{ item.client_authenticator_type | default('client-secret') }}"
+            protocol: "{{ item.protocol | default('openid-connect') }}"
+            base_url: "{{ item.base_url | default(omit) }}"
+            redirect_uris: "{{ item.redirect_uris | default(omit) }}"
+            secret: "{{ item.secret | default(omit) }}"
+          loop: "{{ keycloak_clients }}"

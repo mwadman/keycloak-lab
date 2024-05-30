@@ -1,0 +1,18 @@
+###########
+# Vagrant #
+###########
+
+.vagrant/
+
+##########
+# Python #
+##########
+
+venv/
+
+###########
+# Ansible #
+###########
+
+ansible_collections/
+roles/*

@@ -1,0 +1,18 @@
+---
+podman_create_host_directories: true
+podman_run_as_user: "vagrant"
+
+podman_host_directories: "{{
+  keycloak_podman_host_directories |
+  ansible.builtin.combine(openldap_podman_host_directories)
+  }}"
+
+podman_secrets: "{{
+  keycloak_podman_secrets +
+  openldap_podman_secrets
+  }}"
+
+podman_kube_specs: "{{
+  keycloak_podman_kube_specs +
+  openldap_podman_kube_specs
+  }}"

@@ -1,0 +1,100 @@
+---
+openldap_admin_password: "admin"
+openldap_config_password: "admin"
+openldap_readonly_username: "readonly"
+openldap_readonly_password: "readonly"
+
+openldap_ldif_content: |
+  dn: ou=People,dc=lab,dc=vagrant
+  changetype: add
+  objectClass: organizationalUnit
+  ou: People
+
+  dn: uid=jsmith,ou=People,dc=lab,dc=vagrant
+  changetype: add
+  objectClass: inetOrgPerson
+  cn: John
+  sn: Smith
+  mail: jsmith@lab.vagrant
+  uid: jsmith
+  userpassword: jsmith
+
+openldap_podman_host_directories: # Container chowns directory to subuid
+  /home/vagrant/openldap_podman/volumes/openldap: # Can't use variables in key names
+    owner: "{{ (ansible_facts['getent_passwd'][podman_run_as_user][1] | int * 100) + 910 }}" # openldap runs as uid 910
+    group: "{{ (ansible_facts['getent_passwd'][podman_run_as_user][2] | int * 100) + 910 }}" # openldap runs as gid 910
+    mode: "0755"
+openldap_podman_secrets:
+  - name: "openldap-admin-credentials"
+    data: |
+      apiVersion: "v1"
+      data:
+        admin-password: "{{ openldap_admin_password | b64encode }}"
+        config-password: "{{ openldap_config_password | b64encode }}"
+      kind: "Secret"
+      metadata:
+        name: "openldap-admin-credentials"
+    skip_existing: true
+  - name: "openldap-readonly-credentials"
+    data: |
+      apiVersion: "v1"
+      data:
+        readonly-username: "{{ openldap_readonly_username | b64encode }}"
+        readonly-password: "{{ openldap_readonly_password | b64encode }}"
+      kind: "Secret"
+      metadata:
+        name: "openldap-readonly-credentials"
+    skip_existing: true
+openldap_podman_kube_specs:
+  - state: "started"
+    kube_file_content:
+      apiVersion: "v1"
+      kind: "Pod"
+      metadata:
+        name: "openldap"
+      spec:
+        containers:
+          - name: "openldap"
+            image: "docker.io/osixia/openldap:1.5.0"
+            args:
+              - "--copy-service" # Copies mounted files instead of chown'ing the dir
+            env:
+              - name: "LDAP_ADMIN_PASSWORD"
+                valueFrom:
+                  secretKeyRef:
+                    name: "openldap-admin-credentials"
+                    key: "admin-password"
+              - name: "LDAP_CONFIG_PASSWORD"
+                valueFrom:
+                  secretKeyRef:
+                    name: "openldap-admin-credentials"
+                    key: "config-password"
+              - name: "LDAP_READONLY_USER"
+                value: true
+              - name: "LDAP_READONLY_USER_USERNAME"
+                valueFrom:
+                  secretKeyRef:
+                    name: "openldap-readonly-credentials"
+                    key: "readonly-username"
+              - name: "LDAP_READONLY_USER_PASSWORD"
+                valueFrom:
+                  secretKeyRef:
+                    name: "openldap-readonly-credentials"
+                    key: "readonly-password"
+              - name: "HOSTNAME"
+                value: "{{ ansible_hostname }}"
+              - name: "LDAP_ORGANISATION"
+                value: "{{ ansible_dns.search[0] | replace('.', ' ') }}"
+              - name: "LDAP_DOMAIN"
+                value: "{{ ansible_dns.search[0] }}"
+              - name: "LDAP_TLS" # Remove in prod
+                value: "false"
+              - name: "LDAP_SEED_INTERNAL_LDIF_PATH"
+                value: "/tmp/ldif"
+            volumeMounts:
+              - name: "openldap-volume"
+                mountPath: "/tmp/ldif:Z"
+        volumes:
+          - name: "openldap-volume"
+            hostPath:
+              path: "/home/{{ podman_run_as_user }}/openldap_podman/volumes/openldap"
