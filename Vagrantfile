@@ -18,18 +18,37 @@ Vagrant.configure("2") do |config|
     device.vm.box = "rockylinux/9"
     device.vm.hostname = "keycloak1"
     device.vm.provider "libvirt" do |libvirt|
-      libvirt.memory = 8192
-      libvirt.cpus = 4
-      libvirt.machine_virtual_size = 20
+      libvirt.memory = 4096
+      libvirt.cpus = 2
+      libvirt.machine_virtual_size = 10
     end
   end
   config.vm.define "keycloak2" do |device|
     device.vm.box = "rockylinux/9"
     device.vm.hostname = "keycloak2"
     device.vm.provider "libvirt" do |libvirt|
-      libvirt.memory = 8192
-      libvirt.cpus = 4
-      libvirt.machine_virtual_size = 20
+      libvirt.memory = 4096
+      libvirt.cpus = 2
+      libvirt.machine_virtual_size = 10
+    end
+  end
+
+  config.vm.define "postgres1" do |device|
+    device.vm.box = "rockylinux/9"
+    device.vm.hostname = "postgres1"
+    device.vm.provider "libvirt" do |libvirt|
+      libvirt.memory = 4096
+      libvirt.cpus = 2
+      libvirt.machine_virtual_size = 10
+    end
+  end
+  config.vm.define "postgres2" do |device|
+    device.vm.box = "rockylinux/9"
+    device.vm.hostname = "postgres2"
+    device.vm.provider "libvirt" do |libvirt|
+      libvirt.memory = 4096
+      libvirt.cpus = 2
+      libvirt.machine_virtual_size = 10
     end
   end
 end

@@ -1,6 +1,6 @@
 ---
-- name: Prerequisite Tasks
-  hosts: keycloak
+- name: Prerequisite Podman Tasks
+  hosts: vagrant
   become: true
   tasks:
     - name: Create Podman User
@@ -9,6 +9,22 @@
         create_home: true # Hosts mount points for container
         password: "!" # Disabled
         system: false # Needs subuid and subgid
+    - name: Allow rootless containers to connect to "privileged" ports
+      ansible.posix.sysctl:
+        name: "net.ipv4.ip_unprivileged_port_start"
+        value: "{{ podman_exposed_port }}"
+      when: podman_exposed_port < 1024
+    - name: Add firewalld policy for Keycloak port
+      ansible.posix.firewalld:
+        port: "{{ podman_exposed_port }}/tcp"
+        immediate: true
+        permanent: true
+        state: "enabled"
+
+- name: Prerequisite Keycloak Tasks
+  hosts: keycloak
+  become: true
+  tasks:
     - name: Certificate tasks block
       block:
         - name: Install certificate prerequisite packages
@@ -64,7 +80,7 @@
             mode: "0755"
 
 - name: Podman Roles
-  hosts: keycloak
+  hosts: vagrant
   become: true
   roles:
     - fedora.linux_system_roles.podman
@@ -77,6 +93,7 @@
 - name: Keycloak API Tasks
   hosts: keycloak
   become: true
+  run_once: true # Only need to apply once
   tasks:
     - name: Keycloak API tasks block
       block:

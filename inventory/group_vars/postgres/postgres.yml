@@ -1,0 +1,57 @@
+---
+postgres_exposed_port: 5432
+postgres_username: "admin"
+postgres_password: "admin"
+postgres_database: "keycloak"
+
+postgres_podman_host_directories: # Container chowns directory to subuid
+  /home/podman/postgres_podman/volumes/postgres: # Can't use variables in key names
+    # Gets podman user UID (e.g. 1000), multiplies by 100 (e.g. 100000) and adds UID of container for uniqueness
+    owner: "{{ (ansible_facts['getent_passwd'][podman_run_as_user][1] | int * 100) + 69 }}" # postgres runs as uid 69
+    group: "{{ podman_run_as_user }}"
+    mode: "0700"
+postgres_podman_secrets:
+  - name: "postgres-credentials"
+    data: |
+      apiVersion: v1
+      data:
+        username: "{{ postgres_username | b64encode }}"
+        password: "{{ postgres_password | b64encode }}"
+      kind: Secret
+      metadata:
+        name: postgres-credentials
+    skip_existing: true
+postgres_podman_kube_specs:
+  - state: "started"
+    kube_file_content:
+      apiVersion: "v1"
+      kind: "Pod"
+      metadata:
+        name: "postgres"
+      spec:
+        containers:
+          - name: "postgresql"
+            image: "docker.io/postgres:15.7-alpine" # Tested version - https://www.keycloak.org/server/db
+            ports:
+              - containerPort: 5432
+                hostPort: "{{ postgres_exposed_port }}"
+            volumeMounts:
+              - mountPath: "/var/lib/postgresql/data:Z"
+                name: "postgres-volume"
+            env:
+              - name: "POSTGRES_USER"
+                valueFrom:
+                  secretKeyRef:
+                    name: "postgres-credentials"
+                    key: "username"
+              - name: "POSTGRES_PASSWORD"
+                valueFrom:
+                  secretKeyRef:
+                    name: "postgres-credentials"
+                    key: "password"
+              - name: "POSTGRES_DB"
+                value: "{{ postgres_database }}"
+        volumes:
+          - name: "postgres-volume"
+            hostPath:
+              path: "/home/{{ podman_run_as_user }}/postgres_podman/volumes/postgres"

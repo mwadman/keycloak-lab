@@ -1,0 +1,3 @@
+---
+podman_create_host_directories: true
+podman_run_as_user: "vagrant"

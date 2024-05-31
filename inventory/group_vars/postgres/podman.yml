@@ -1,0 +1,14 @@
+---
+podman_host_directories: "{{
+  postgres_podman_host_directories
+  }}"
+
+podman_secrets: "{{
+  postgres_podman_secrets
+  }}"
+
+podman_kube_specs: "{{
+  postgres_podman_kube_specs
+  }}"
+
+podman_exposed_port: "{{ postgres_exposed_port }}"

@@ -1,16 +1,13 @@
 ---
+keycloak_exposed_port: 443
 keycloak_admin_username: "admin"
 keycloak_admin_password: "admin"
 
-keycloak_postgres_username: "admin"
-keycloak_postgres_password: "admin"
-keycloak_postgres_database: "keycloak"
+# Get values from Postgres vars
+keycloak_postgres_username: "{{ hostvars[groups['postgres'][0]]['postgres_username'] }}"
+keycloak_postgres_password: "{{ hostvars[groups['postgres'][0]]['postgres_password'] }}"
+keycloak_postgres_database: "{{ hostvars[groups['postgres'][0]]['postgres_database'] }}"
 
-keycloak_podman_host_directories: # Container chowns directory to subuid
-  /home/podman/keycloak_podman/volumes/postgres: # Can't use variables in key names
-    owner: "{{ (ansible_facts['getent_passwd'][podman_run_as_user][1] | int * 100) + 69 }}" # postgres runs as uid 69
-    group: "{{ podman_run_as_user }}"
-    mode: "0700"
 keycloak_podman_secrets:
   - name: "keycloak-admin-credentials"
     data: |
@@ -45,7 +42,7 @@ keycloak_podman_kube_specs:
             image: "quay.io/keycloak/keycloak:24.0"
             ports:
               - containerPort: 8443
-                hostPort: 8443
+                hostPort: "{{ keycloak_exposed_port }}"
             args:
               - "start"
             env:
@@ -62,11 +59,11 @@ keycloak_podman_kube_specs:
               - name: "KC_DB"
                 value: "postgres"
               # - name: "KC_DB_URL"
-              #   value: "jdbc:postgresql://postgres/{{ keycloak_postgres_database }}"
+              #   value: "jdbc:postgresql://postgres1.lab.vagrant:5432/{{ keycloak_postgres_database }}"
               - name: "KC_DB_URL_HOST"
-                value: "localhost"
+                value: "postgres1.lab.vagrant"
               - name: "KC_DB_URL_PORT"
-                value: 5432
+                value: "{{ hostvars[groups['postgres'][0]]['postgres_exposed_port'] }}" # Get values from Postgres vars
               - name: "KC_DB_URL_DATABASE"
                 value: "{{ keycloak_postgres_database }}"
               - name: "KC_DB_USERNAME"
@@ -79,46 +76,27 @@ keycloak_podman_kube_specs:
                   secretKeyRef:
                     name: "postgres-credentials"
                     key: "password"
-              - name: "KC_HOSTNAME"
-                value: "{{ ansible_hostname }}.{{ ansible_dns.search[0] }}"
+              - name: "KC_HOSTNAME_URL"
+                value: "https://{{ ansible_hostname }}.{{ ansible_dns.search[0] }}{{(':' + keycloak_exposed_port) if (keycloak_exposed_port != 443)}}"
               - name: "KC_HTTPS_CERTIFICATE_KEY_FILE"
-                value: "/etc/pki/tls/selfsigned/selfsigned.key"
+                value: "/etc/pki/tls/keycloak/selfsigned.key"
               - name: "KC_HTTPS_CERTIFICATE_FILE"
-                value: "/etc/pki/tls/selfsigned/selfsigned.pem"
+                value: "/etc/pki/tls/keycloak/selfsigned.pem"
+              # - name: "KC_HTTPS_CLIENT_AUTH"
+              #   value: "required"
               - name: "JAVA_OPTS_APPEND"
                 value: "-Djava.net.preferIPv4Stack=true" # Disables IPv6
             volumeMounts:
-              - name: "self-signed-certificate"
-                mountPath: "/etc/pki/tls/selfsigned:z"
+              - name: "certificate-volume"
+                mountPath: "/etc/pki/tls/keycloak:z"
                 readOnly: true
-          - name: "postgresql"
-            image: "docker.io/postgres:15.7-alpine" # Tested version - https://www.keycloak.org/server/db
-            volumeMounts:
-              - mountPath: "/var/lib/postgresql/data:Z"
-                name: "postgres-volume"
-            env:
-              - name: "POSTGRES_USER"
-                valueFrom:
-                  secretKeyRef:
-                    name: "postgres-credentials"
-                    key: "username"
-              - name: "POSTGRES_PASSWORD"
-                valueFrom:
-                  secretKeyRef:
-                    name: "postgres-credentials"
-                    key: "password"
-              - name: "POSTGRES_DB"
-                value: "{{ keycloak_postgres_database }}"
         volumes:
-          - name: "postgres-volume"
-            hostPath:
-              path: "/home/{{ podman_run_as_user }}/keycloak_podman/volumes/postgres"
-          - name: "self-signed-certificate"
+          - name: "certificate-volume"
             hostPath:
               path: "/home/{{ podman_run_as_user }}/certs"
 
 keycloak_common:
-  keycloak_url: "https://keycloak.lab.vagrant:8443"
+  keycloak_url: "https://keycloak1.lab.vagrant"
   realm: "master"
   username: "{{ keycloak_admin_username }}"
   password: "{{ keycloak_admin_password }}"
@@ -141,8 +119,8 @@ keycloak_user_federations:
     uuidLDAPAttribute: "uid"
 keycloak_clients:
   - realm: "ldap"
-    id: "gitlab"
-    base_url: "http://keycloak.lab.vagrant:9080"
+    id: "example-client"
+    base_url: "http://example.lab.vagrant"
     redirect_uris:
-      - "http://keycloak.lab.vagrant:9080/*"
+      - "http://example.lab.vagrant/*"
     secret: "abcdefghijklmnopqrstuvwxyz123456"
