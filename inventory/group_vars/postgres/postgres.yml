@@ -5,7 +5,7 @@ postgres_password: "admin"
 postgres_database: "keycloak"
 
 postgres_podman_host_directories: # Container chowns directory to subuid
-  /home/podman/postgres_podman/volumes/postgres: # Can't use variables in key names
+  /home/vagrant/postgres_podman/volumes/postgres: # Can't use variables in key names
     # Gets podman user UID (e.g. 1000), multiplies by 100 (e.g. 100000) and adds UID of container for uniqueness
     owner: "{{ (ansible_facts['getent_passwd'][podman_run_as_user][1] | int * 100) + 69 }}" # postgres runs as uid 69
     group: "{{ podman_run_as_user }}"
