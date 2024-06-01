@@ -1,22 +1,27 @@
 ---
 postgres_exposed_port: 5432
-postgres_username: "admin"
-postgres_password: "admin"
-postgres_database: "keycloak"
+postgres_admin_password: "postgres" # Value for user 'postgres'
+postgres_database: "keycloak" # App DB name
+postgres_username: "keycloak" # App DB user
+postgres_password: "keycloak" # App DB password
+
+repmgr_password: "repmgr"
 
 postgres_podman_host_directories: # Container chowns directory to subuid
   /home/vagrant/postgres_podman/volumes/postgres: # Can't use variables in key names
     # Gets podman user UID (e.g. 1000), multiplies by 100 (e.g. 100000) and adds UID of container for uniqueness
-    owner: "{{ (ansible_facts['getent_passwd'][podman_run_as_user][1] | int * 100) + 69 }}" # postgres runs as uid 69
-    group: "{{ podman_run_as_user }}"
-    mode: "0700"
+    owner: "{{ 1001 + podman_subuid_info['vagrant']['start'] - 1 }}" # Bitnami postgres runs as uid 1001
+    group: "{{ 1001 + podman_subgid_info['vagrant']['start'] - 1 }}"
+    mode: "0750"
 postgres_podman_secrets:
   - name: "postgres-credentials"
     data: |
       apiVersion: v1
       data:
+        postgres_admin_password: "{{ postgres_admin_password | b64encode }}"
         username: "{{ postgres_username | b64encode }}"
         password: "{{ postgres_password | b64encode }}"
+        repmgr_password: "{{ repmgr_password | b64encode }}"
       kind: Secret
       metadata:
         name: postgres-credentials
@@ -30,15 +35,20 @@ postgres_podman_kube_specs:
         name: "postgres"
       spec:
         containers:
-          - name: "postgresql"
-            image: "docker.io/postgres:15.7-alpine" # Tested version - https://www.keycloak.org/server/db
+          - name: "{{ ansible_hostname }}"
+            image: "docker.io/bitnami/postgresql-repmgr:15.1.0-debian-11-r0" # https://github.com/bitnami/charts/issues/14905
             ports:
               - containerPort: 5432
                 hostPort: "{{ postgres_exposed_port }}"
             volumeMounts:
-              - mountPath: "/var/lib/postgresql/data:Z"
+              - mountPath: "/bitnami/postgresql:Z"
                 name: "postgres-volume"
             env:
+              - name: "POSTGRESQL_POSTGRES_PASSWORD"
+                valueFrom:
+                  secretKeyRef:
+                    name: "postgres-credentials"
+                    key: "postgres_admin_password"
               - name: "POSTGRES_USER"
                 valueFrom:
                   secretKeyRef:
@@ -49,8 +59,25 @@ postgres_podman_kube_specs:
                   secretKeyRef:
                     name: "postgres-credentials"
                     key: "password"
+              - name: "REPMGR_PASSWORD"
+                valueFrom:
+                  secretKeyRef:
+                    name: "postgres-credentials"
+                    key: "repmgr_password"
               - name: "POSTGRES_DB"
                 value: "{{ postgres_database }}"
+              - name: "REPMGR_NODE_NETWORK_NAME"
+                value: "{{ ansible_hostname }}"
+              - name: "REPMGR_PORT_NUMBER"
+                value: 5432
+              - name: "REPMGR_PRIMARY_HOST"
+                value: "{{ groups['postgres'][0] }}"
+              - name: "REPMGR_PRIMARY_PORT"
+                value: 5432
+              - name: "REPMGR_NODE_NAME" # Needs to be in the bash regex format of "^.*+-[0-9]+$" (e.g. postgres-0)
+                value: "{{ 'postgres-' + ((lookup('ansible.utils.index_of', groups['postgres'], 'eq', inventory_hostname) + 1) | string) }}"
+              - name: "REPMGR_PARTNER_NODES"
+                value: "postgres1:5432,postgres2:5432" # Add more (e.g. postgres3) if there are more than 2 nodes
         volumes:
           - name: "postgres-volume"
             hostPath:
