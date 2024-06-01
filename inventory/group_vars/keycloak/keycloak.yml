@@ -61,7 +61,7 @@ keycloak_podman_kube_specs:
               # - name: "KC_DB_URL"
               #   value: "jdbc:postgresql://postgres1.lab.vagrant:5432/{{ keycloak_postgres_database }}"
               - name: "KC_DB_URL_HOST"
-                value: "postgres1.lab.vagrant"
+                value: "{{ hostvars[groups['postgres'][0]]['postgres_master_fqdn'] }}" # Get values from Postgres vars
               - name: "KC_DB_URL_PORT"
                 value: "{{ hostvars[groups['postgres'][0]]['postgres_exposed_port'] }}" # Get values from Postgres vars
               - name: "KC_DB_URL_DATABASE"
