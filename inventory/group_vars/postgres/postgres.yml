@@ -1,22 +1,30 @@
 ---
 postgres_exposed_port: 5432
+
+postgres_admin_password: "postgres" # Password for "postgres" user
+postgres_replication_username: "replication"
+postgres_replication_password: "replication"
 postgres_username: "admin"
 postgres_password: "admin"
 postgres_database: "keycloak"
 
+postgres_master_fqdn: "{{ groups['postgres'][0] + '.' + ansible_dns.search[0] }}"
+
 postgres_podman_host_directories: # Container chowns directory to subuid
   /home/vagrant/postgres_podman/volumes/postgres: # Can't use variables in key names
-    # Gets podman user UID (e.g. 1000), multiplies by 100 (e.g. 100000) and adds UID of container for uniqueness
-    owner: "{{ (ansible_facts['getent_passwd'][podman_run_as_user][1] | int * 100) + 69 }}" # postgres runs as uid 69
-    group: "{{ podman_run_as_user }}"
-    mode: "0700"
+    owner: "{{ 1001 + podman_subuid_info['vagrant']['start'] - 1 }}" # Bitnami postgres runs as uid 1001
+    group: "{{ 1001 + podman_subgid_info['vagrant']['start'] - 1 }}"
+    mode: "0750"
 postgres_podman_secrets:
   - name: "postgres-credentials"
     data: |
       apiVersion: v1
       data:
-        username: "{{ postgres_username | b64encode }}"
-        password: "{{ postgres_password | b64encode }}"
+        postgres-password: "{{ postgres_admin_password | b64encode }}"
+        replication-username: "{{ postgres_replication_username | b64encode }}"
+        replication-password: "{{ postgres_replication_password | b64encode }}"
+        database-username: "{{ postgres_username | b64encode }}"
+        database-password: "{{ postgres_password | b64encode }}"
       kind: Secret
       metadata:
         name: postgres-credentials
@@ -31,26 +39,47 @@ postgres_podman_kube_specs:
       spec:
         containers:
           - name: "postgresql"
-            image: "docker.io/postgres:15.7-alpine" # Tested version - https://www.keycloak.org/server/db
+            image: "docker.io/bitnami/postgresql:15.7.0" # Tested version - https://www.keycloak.org/server/db
             ports:
               - containerPort: 5432
                 hostPort: "{{ postgres_exposed_port }}"
             volumeMounts:
-              - mountPath: "/var/lib/postgresql/data:Z"
+              - mountPath: "/bitnami/postgresql:Z"
                 name: "postgres-volume"
             env:
-              - name: "POSTGRES_USER"
+              - name: "POSTGRESQL_POSTGRES_PASSWORD"
                 valueFrom:
                   secretKeyRef:
                     name: "postgres-credentials"
-                    key: "username"
-              - name: "POSTGRES_PASSWORD"
+                    key: "postgres-password"
+              - name: "POSTGRESQL_USERNAME"
                 valueFrom:
                   secretKeyRef:
                     name: "postgres-credentials"
-                    key: "password"
-              - name: "POSTGRES_DB"
+                    key: "database-username"
+              - name: "POSTGRESQL_PASSWORD"
+                valueFrom:
+                  secretKeyRef:
+                    name: "postgres-credentials"
+                    key: "database-password"
+              - name: "POSTGRESQL_REPLICATION_USER"
+                valueFrom:
+                  secretKeyRef:
+                    name: "postgres-credentials"
+                    key: "replication-username"
+              - name: "POSTGRESQL_REPLICATION_PASSWORD"
+                valueFrom:
+                  secretKeyRef:
+                    name: "postgres-credentials"
+                    key: "replication-password"
+              - name: "POSTGRESQL_DATABASE"
                 value: "{{ postgres_database }}"
+              - name: "POSTGRESQL_MASTER_HOST"
+                value: "{{ postgres_master_fqdn }}"
+              - name: "POSTGRESQL_MASTER_PORT_NUMBER"
+                value: "{{ postgres_exposed_port }}"
+              - name: "POSTGRESQL_REPLICATION_MODE"
+                value: "{{ 'master' if (inventory_hostname + '.' + ansible_dns.search[0]) == postgres_master_fqdn else 'slave' }}"
         volumes:
           - name: "postgres-volume"
             hostPath:
