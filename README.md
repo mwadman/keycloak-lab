@@ -26,7 +26,7 @@ Before creating the environment, the following variables may need to be changed 
 - The `keycloak_admin_password` and `postgres_password` variables should be changed and encrypted in an Ansible vault.
 - Set `keycloak_common.validate_certs` to true or remove it once you've got a trusted certificate.
 - Change the paths of the certificate variables in `./inventory/group_vars/keycloak.yml` and add the `KC_TRUSTSTORE_PATHS` variable if required.
-- Change the `keycloak_common` and `keycloak_clients` URL values appropriately, for example to the DNS label given to a load balancer.
+- Change the `KC_HOSTNAME_URL` and `keycloak_common` URL values appropriately, for example to the DNS label given to a load balancer.
 - Change the value of `KC_HTTPS_CLIENT_AUTH` to `required`.
 
 ### Vagrant Up
